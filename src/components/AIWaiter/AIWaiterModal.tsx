@@ -108,13 +108,25 @@ export const AIWaiterModal: React.FC<Props> = ({
     if (!voiceEnabled || !('speechSynthesis' in window)) return;
     window.speechSynthesis.cancel();
 
-    const utterance = new SpeechSynthesisUtterance(arabicText);
-    utterance.rate = 0.88;
-    utterance.pitch = 0.98;
+    // Clean text: strip emojis, bullet points, and trim long essays to natural conversational sentences
+    const cleanSpeech = arabicText
+      .replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '') // strip all emojis
+      .replace(/[#*_-]/g, ' ')
+      .split(/[.!؟\n]/)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+      .slice(0, 2)
+      .join('، ');
+
+    const textToSpeak = cleanSpeech.length > 0 ? cleanSpeech : arabicText;
+
+    const utterance = new SpeechSynthesisUtterance(textToSpeak);
+    utterance.rate = 1.08; // Natural, lively, fluent Levantine conversational speed (no slow-motion!)
+    utterance.pitch = 1.02; // Warm, crisp, engaging tone
 
     const voices = window.speechSynthesis.getVoices();
     const arabicVoice =
-      voices.find((v) => v.lang.startsWith('ar') && (v.name.includes('Maged') || v.name.includes('Tarik') || v.name.includes('Laila'))) ||
+      voices.find((v) => v.lang.startsWith('ar') && (v.name.includes('Maged') || v.name.includes('Tarik') || v.name.includes('Laila') || v.name.includes('Mariam') || v.name.includes('Salma'))) ||
       voices.find((v) => v.lang.startsWith('ar')) ||
       voices.find((v) => v.lang.includes('ar-') || v.lang.includes('ara'));
 
