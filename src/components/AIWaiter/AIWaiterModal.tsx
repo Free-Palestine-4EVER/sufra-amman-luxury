@@ -1,8 +1,26 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Mic, MicOff, Volume2, VolumeX, Send, X, Sparkles, Utensils, Eye, Plus, Minus, Check } from 'lucide-react';
+import {
+  Mic,
+  MicOff,
+  Volume2,
+  VolumeX,
+  Send,
+  X,
+  Sparkles,
+  Utensils,
+  Eye,
+  Plus,
+  Minus,
+  Check,
+  ShoppingBag,
+  Flame,
+  ArrowRight
+} from 'lucide-react';
+import confetti from 'canvas-confetti';
 import { generateWaiterResponse } from '../../services/aiWaiterService';
 import type { Message } from '../../services/aiWaiterService';
 import type { MenuItem } from '../../data/restaurantData';
+import { RESTAURANT_INFO } from '../../data/restaurantData';
 import type { CartItem } from '../Cart/CartModal';
 
 interface Props {
@@ -13,6 +31,7 @@ interface Props {
   cartItems: CartItem[];
   onAddToCart: (dish: MenuItem) => void;
   onUpdateQuantity: (dishId: string, quantity: number) => void;
+  onClearCart: () => void;
   onOpen3D: (dish: MenuItem) => void;
 }
 
@@ -24,14 +43,15 @@ export const AIWaiterModal: React.FC<Props> = ({
   cartItems,
   onAddToCart,
   onUpdateQuantity,
+  onClearCart,
   onOpen3D
 }) => {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: 'welcome',
       sender: 'waiter',
-      textEn: `Ahlan wa Sahlan to Sufra Amman! I am Karam, your personal Gastronomy Concierge & AI Waiter at ${currentTable.nameEn}. May I recommend Jordan's national pride, our Royal Mansaf Baladi, or guide you through our stone-oven specialties?`,
-      textAr: `أهلاً وسهلاً بكم في مطعم سفرة عمّان! أنا كرم، نادلكم الذكي ومستشاركم للضيافة على ${currentTable.nameAr}. يسعدني أن أرشح لكم منسفنا البلدي الملكي، أو أساعدكم في اختيار أشهى فخارات الحجر والمشاوي. تفضلوا كيف أخدمكم؟`,
+      textEn: `Ahlan wa Sahlan to Sufra Amman! I am Karam, your personal Gastronomy Concierge & AI Waiter at ${currentTable.nameEn}. May I recommend Jordan's national pride, our Royal Mansaf Baladi, or guide you through our stone-oven specialties? You can also order and checkout directly with me anytime!`,
+      textAr: `أهلاً وسهلاً بكم في مطعم سفرة عمّان! أنا كرم، نادلكم الذكي ومستشاركم للضيافة على ${currentTable.nameAr}. يسعدني أن أرشح لكم منسفنا البلدي الملكي، أو أساعدكم في اختيار أشهى فخارات الحجر والمشاوي. بإمكانكم إتمام الطلب وإرساله للمطبخ مباشرة هنا في المحادثة!`,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     }
   ]);
@@ -41,10 +61,13 @@ export const AIWaiterModal: React.FC<Props> = ({
   const [voiceEnabled, setVoiceEnabled] = useState(true);
   const [isTyping, setIsTyping] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [orderPlaced, setOrderPlaced] = useState(false);
+  const [orderStage, setOrderStage] = useState<number>(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Quick prompt suggestions
   const quickPromptsEn = [
+    "🚀 Send Order to Kitchen",
     "👑 Tell me about the Royal Mansaf",
     "🥩 Recommend best charcoal grills",
     "🌱 Vegetarian specialties",
@@ -54,6 +77,7 @@ export const AIWaiterModal: React.FC<Props> = ({
   ];
 
   const quickPromptsAr = [
+    "🚀 إتمام وإرسال الطلب للمطبخ",
     "👑 حدثني عن المنسف البلدي وجميد الكرك",
     "🥩 رشح لي أفضل المشاوي والصاجيات",
     "🌱 خيارات وأطباق نباتية",
@@ -64,22 +88,30 @@ export const AIWaiterModal: React.FC<Props> = ({
 
   const currentPrompts = lang === 'en' ? quickPromptsEn : quickPromptsAr;
 
+  // Calculate bill totals
+  const subtotal = cartItems.reduce(
+    (sum, item) => sum + item.dish.price * item.quantity,
+    0
+  );
+  const serviceCharge = subtotal * RESTAURANT_INFO.serviceRate;
+  const salesTax = (subtotal + serviceCharge) * RESTAURANT_INFO.taxRate;
+  const total = subtotal + serviceCharge + salesTax;
+  const totalCartCount = cartItems.reduce((sum, item) => sum + item.quantity, 0);
+
   // Auto-scroll chat
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isTyping]);
+  }, [messages, isTyping, orderPlaced]);
 
   // Authentic Arabic Voice Synthesis Engine
-  // Always speaks authentic Arabic regardless of user interface language
   const speakRealArabic = (arabicText: string) => {
     if (!voiceEnabled || !('speechSynthesis' in window)) return;
     window.speechSynthesis.cancel();
 
     const utterance = new SpeechSynthesisUtterance(arabicText);
-    utterance.rate = 0.88; // Dignified, calm hospitality cadence
-    utterance.pitch = 0.98; // Natural warm tone
+    utterance.rate = 0.88;
+    utterance.pitch = 0.98;
 
-    // Hunt for native Arabic voices (Tarik, Maged, Laila, Mariam, Google Arabic, etc.)
     const voices = window.speechSynthesis.getVoices();
     const arabicVoice =
       voices.find((v) => v.lang.startsWith('ar') && (v.name.includes('Maged') || v.name.includes('Tarik') || v.name.includes('Laila'))) ||
@@ -96,7 +128,6 @@ export const AIWaiterModal: React.FC<Props> = ({
     window.speechSynthesis.speak(utterance);
   };
 
-  // Helper to get quantity of dish in cart
   const getItemQuantity = (dishId: string) => {
     const found = cartItems.find((item) => item.dish.id === dishId);
     return found ? found.quantity : 0;
@@ -113,8 +144,57 @@ export const AIWaiterModal: React.FC<Props> = ({
         setToastMessage(lang === 'en' ? `Updated ${dish.nameEn} (x${newQty})` : `تم تحديث ${dish.nameAr} (×${newQty})`);
       }
     }
-
     setTimeout(() => setToastMessage(null), 2000);
+  };
+
+  // Complete & Send Order from Chat
+  const handleCompleteOrderInChat = () => {
+    if (cartItems.length === 0) {
+      const emptyMsg: Message = {
+        id: Date.now().toString(),
+        sender: 'waiter',
+        textEn: "Your table order is currently empty! Please choose from our Royal Mansaf or signature grills first, and I will gladly send it to the kitchen.",
+        textAr: "طلب طاولتكم فارغ حالياً! يرجى اختيار بعض الأطباق الشهية كمنسفنا البلدي أو المشاوي أولاً، وسأقوم بإرسالها فوراً للمطبخ.",
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      };
+      setMessages((prev) => [...prev, emptyMsg]);
+      speakRealArabic(emptyMsg.textAr);
+      return;
+    }
+
+    // Trigger celebration confetti
+    try {
+      confetti({
+        particleCount: 80,
+        spread: 70,
+        origin: { y: 0.6 },
+        colors: ['#d4af37', '#ffffff', '#e5c07b', '#997d26']
+      });
+    } catch {}
+
+    setOrderPlaced(true);
+    setOrderStage(1);
+
+    const orderNumber = `SF-${Math.floor(1000 + Math.random() * 9000)}`;
+
+    const confirmMsg: Message = {
+      id: Date.now().toString(),
+      sender: 'waiter',
+      textEn: `🎉 Excellent! Your table order (#${orderNumber}) has been officially sent to Chef Abu Omar at the stone ovens! Total: ${total.toFixed(2)} JOD (${(total * 1.41).toFixed(2)} USD). Our kitchen team has fired the oak charcoal and is preparing your feast now!`,
+      textAr: `🎉 ألف مبارك! تم إرسال طلبكم الرسمي برقم (#${orderNumber}) مباشرة إلى شيف مطعم سفرة عند مواقد الحجر والفخار! المجموع: ${total.toFixed(2)} دينار أردني. يجري الآن إعداد وليمتكم بكل عناية وجودة!`,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    };
+
+    setMessages((prev) => [...prev, confirmMsg]);
+    speakRealArabic(`تم إرسال طلبكم بنجاح إلى شيف المطبخ وموقد الحطب، ألف صحة وعافية! سنوافيكم بمراحل التحضير حالاً.`);
+
+    // Progress through live kitchen stages
+    setTimeout(() => setOrderStage(2), 3500);
+    setTimeout(() => setOrderStage(3), 7000);
+    setTimeout(() => {
+      setOrderStage(4);
+      onClearCart();
+    }, 11000);
   };
 
   // Voice Recognition (Microphone)
@@ -158,6 +238,21 @@ export const AIWaiterModal: React.FC<Props> = ({
     const textToSend = userText || input;
     if (!textToSend.trim()) return;
 
+    // Check if user is asking to checkout or send order
+    const lower = textToSend.toLowerCase();
+    const isCheckoutQuery =
+      lower.includes('checkout') ||
+      lower.includes('finish') ||
+      lower.includes('send order') ||
+      lower.includes('place order') ||
+      lower.includes('complete') ||
+      lower.includes('bill') ||
+      textToSend.includes('حساب') ||
+      textToSend.includes('إتمام') ||
+      textToSend.includes('ارسل') ||
+      textToSend.includes('أرسل') ||
+      textToSend.includes('طلب');
+
     const userMsg: Message = {
       id: Date.now().toString(),
       sender: 'user',
@@ -170,11 +265,18 @@ export const AIWaiterModal: React.FC<Props> = ({
     setInput('');
     setIsTyping(true);
 
+    if (isCheckoutQuery && cartItems.length > 0) {
+      setTimeout(() => {
+        setIsTyping(false);
+        handleCompleteOrderInChat();
+      }, 700);
+      return;
+    }
+
     setTimeout(() => {
       const waiterResponse = generateWaiterResponse(textToSend, lang, currentTable.nameEn);
       setIsTyping(false);
       setMessages((prev) => [...prev, waiterResponse]);
-      // Speak authentic Arabic line regardless of written language
       speakRealArabic(waiterResponse.textAr);
     }, 600);
   };
@@ -183,7 +285,7 @@ export const AIWaiterModal: React.FC<Props> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/85 backdrop-blur-xl transition-all">
-      <div className="relative w-full max-w-xl h-[92vh] sm:h-[680px] bg-[#120f0d] border border-[#d4af37]/45 rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden">
+      <div className="relative w-full max-w-xl h-[92vh] sm:h-[700px] bg-[#120f0d] border border-[#d4af37]/45 rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden">
         {/* Luxury Gold Filigree Header */}
         <div className="flex items-center justify-between p-4 sm:p-5 border-b border-[#2d2417] bg-[#17130f]">
           <div className="flex items-center gap-3">
@@ -211,7 +313,6 @@ export const AIWaiterModal: React.FC<Props> = ({
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Arabic Voice Toggle Badge */}
             <button
               onClick={() => {
                 const nextState = !voiceEnabled;
@@ -231,7 +332,6 @@ export const AIWaiterModal: React.FC<Props> = ({
               <span className="text-[10px] font-bold hidden sm:inline text-[#d4af37]">عربي</span>
             </button>
 
-            {/* Close button */}
             <button
               onClick={() => {
                 if ('speechSynthesis' in window) window.speechSynthesis.cancel();
@@ -259,7 +359,11 @@ export const AIWaiterModal: React.FC<Props> = ({
             <button
               key={idx}
               onClick={() => handleSend(prompt.replace(/^[^\w\s\u0600-\u06FF]+/, '').trim())}
-              className="text-[11px] whitespace-nowrap px-3.5 py-1.5 rounded-full bg-[#1e1913] hover:bg-[#2c241b] text-white/80 hover:text-[#f7ecd2] border border-[#d4af37]/25 hover:border-[#d4af37] transition font-medium"
+              className={`text-[11px] whitespace-nowrap px-3.5 py-1.5 rounded-full border transition font-medium ${
+                idx === 0 && totalCartCount > 0
+                  ? 'gold-gradient-btn text-black font-bold border-[#d4af37]'
+                  : 'bg-[#1e1913] hover:bg-[#2c241b] text-white/80 hover:text-[#f7ecd2] border-[#d4af37]/25 hover:border-[#d4af37]'
+              }`}
             >
               {prompt}
             </button>
@@ -292,7 +396,7 @@ export const AIWaiterModal: React.FC<Props> = ({
                 </div>
               </div>
 
-              {/* Recommended Dish Cards inside Chat with LIVE Cart Controls */}
+              {/* Recommended Dish Cards inside Chat */}
               {msg.recommendedDishes && msg.recommendedDishes.length > 0 && (
                 <div className="w-full max-w-[94%] mt-3 space-y-2">
                   <div className="text-[10px] font-bold text-[#d4af37] tracking-widest uppercase flex items-center gap-1.5">
@@ -339,7 +443,6 @@ export const AIWaiterModal: React.FC<Props> = ({
                             </div>
                           </div>
 
-                          {/* Action Buttons: Dynamic Cart Addition & 3D */}
                           <div className="mt-3 flex items-center gap-2">
                             {isInCart ? (
                               <div className="flex-1 flex items-center justify-between bg-[#292219] border border-[#d4af37]/60 rounded-xl px-2 py-1">
@@ -390,6 +493,51 @@ export const AIWaiterModal: React.FC<Props> = ({
             </div>
           ))}
 
+          {/* Live Kitchen Preparation Tracker inside Chat if order is active */}
+          {orderPlaced && (
+            <div className="p-4 rounded-3xl bg-[#1b1510] border-2 border-[#d4af37] shadow-2xl space-y-3 animate-fade-in">
+              <div className="flex items-center justify-between border-b border-[#2d2417] pb-2">
+                <div className="flex items-center gap-2">
+                  <Flame className="w-5 h-5 text-amber-500 animate-pulse" />
+                  <h4 className="text-sm font-bold text-white font-serif-luxury">
+                    {lang === 'en' ? 'Live Kitchen Status' : 'حالة المطبخ المباشرة'}
+                  </h4>
+                </div>
+                <span className="text-[10px] text-[#d4af37] bg-[#d4af37]/15 px-2.5 py-0.5 rounded-full font-bold">
+                  {currentTable.id}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-4 gap-1.5 text-center">
+                {[
+                  { step: 1, labelEn: 'Received', labelAr: 'استلام', icon: '📝' },
+                  { step: 2, labelEn: 'Cooking', labelAr: 'الطهي', icon: '🔥' },
+                  { step: 3, labelEn: 'Plating', labelAr: 'التزيين', icon: '✨' },
+                  { step: 4, labelEn: 'Served!', labelAr: 'التقديم!', icon: '🍽️' },
+                ].map((s) => (
+                  <div
+                    key={s.step}
+                    className={`p-2 rounded-xl border text-[11px] flex flex-col items-center gap-1 transition-all ${
+                      orderStage >= s.step
+                        ? 'bg-[#d4af37]/20 border-[#d4af37] text-[#f7ecd2] font-bold shadow-md'
+                        : 'bg-black/30 border-white/5 text-white/30'
+                    }`}
+                  >
+                    <span className="text-sm">{s.icon}</span>
+                    <span>{lang === 'en' ? s.labelEn : s.labelAr}</span>
+                  </div>
+                ))}
+              </div>
+
+              <p className="text-xs text-[#d4af37] text-center font-medium">
+                {orderStage === 1 && (lang === 'en' ? 'Maître d\' Karam registered your order.' : 'تم تسجيل طلبكم رسمياً في نظام الصالة.')}
+                {orderStage === 2 && (lang === 'en' ? 'Stone ovens and charcoal grills fired!' : 'قيد الطهي على موقد الحجر والشواية!')}
+                {orderStage === 3 && (lang === 'en' ? 'Plating with baladi jameed and toasted nuts.' : 'التزيين بالسمن البلدي واللوز والصنوبر المحمص.')}
+                {orderStage === 4 && (lang === 'en' ? 'Delivering to your table right now! Sahtain wa Afiah.' : 'في طريقه إلى طاولتكم الآن! صحتين وعافية.')}
+              </p>
+            </div>
+          )}
+
           {isTyping && (
             <div className="flex items-center gap-2 text-xs text-[#d4af37] bg-[#181410] border border-[#352c1e] px-4 py-2.5 rounded-2xl w-fit">
               <span className="w-2 h-2 rounded-full bg-[#d4af37] animate-bounce" />
@@ -403,6 +551,33 @@ export const AIWaiterModal: React.FC<Props> = ({
 
           <div ref={messagesEndRef} />
         </div>
+
+        {/* IN-CHAT ORDER SUMMARY & INSTANT CHECKOUT BAR */}
+        {totalCartCount > 0 && !orderPlaced && (
+          <div className="px-4 py-3 bg-[#191410] border-t border-[#d4af37]/35 flex items-center justify-between gap-3 shadow-2xl">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-[#d4af37]/20 border border-[#d4af37]/40 flex items-center justify-center text-[#d4af37]">
+                <ShoppingBag className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="text-[10px] text-white/50 uppercase font-bold tracking-wider">
+                  {lang === 'en' ? `${totalCartCount} Dishes in Order` : `${totalCartCount} أطباق في الطلب`}
+                </div>
+                <div className="text-sm font-serif-luxury font-bold text-[#d4af37]">
+                  {total.toFixed(2)} JOD <span className="text-[11px] text-white/40 font-mono">({(total * 1.41).toFixed(2)} USD)</span>
+                </div>
+              </div>
+            </div>
+
+            <button
+              onClick={handleCompleteOrderInChat}
+              className="px-5 py-2.5 gold-gradient-btn text-black font-extrabold text-xs rounded-xl shadow-xl hover:scale-[1.02] active:scale-98 transition flex items-center gap-1.5"
+            >
+              <span>{lang === 'en' ? 'Send Order to Kitchen' : 'إرسال الطلب للمطبخ'}</span>
+              <ArrowRight className="w-3.5 h-3.5 stroke-[3] rtl:rotate-180" />
+            </button>
+          </div>
+        )}
 
         {/* Input Bar */}
         <div className="p-3 bg-[#17130f] border-t border-[#2d2417]">
@@ -432,8 +607,8 @@ export const AIWaiterModal: React.FC<Props> = ({
               onChange={(e) => setInput(e.target.value)}
               placeholder={
                 lang === 'en'
-                  ? 'Ask Karam about Mansaf, wine pairings, or call table captain...'
-                  : 'اسأل كرم عن المنسف، المشاوي، أو اطلب ماء وخبز طازج...'
+                  ? 'Ask Karam, add dishes, or type "Send Order to Kitchen"...'
+                  : 'اسأل كرم، أضف أطباقك، أو اكتب "أرسل الطلب للمطبخ"...'
               }
               className="flex-1 bg-[#0f0d0b] border border-white/10 focus:border-[#d4af37] text-white text-sm rounded-2xl px-4 py-3 outline-none transition placeholder:text-white/35"
             />

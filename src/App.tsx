@@ -615,6 +615,7 @@ export function App() {
         cartItems={cartItems}
         onAddToCart={handleAddToCart}
         onUpdateQuantity={handleUpdateQuantity}
+        onClearCart={handleClearCart}
         onOpen3D={(dish) => {
           setIsAIWaiterOpen(false);
           setDishFor3D(dish);
